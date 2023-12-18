@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package oauth2;
+
+service OAuth2Service {
+  // A method for token generation
+  rpc generateToken (TokenRequest) returns (TokenResponse);
+
+  // A method for token validation
+  rpc validateToken (TokenValidationRequest) returns (TokenValidationResponse);
+}
+
+message TokenRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  string grant_type = 3;
+  string scope = 4;
+  bool refresh = 5;
+}
+
+message TokenResponse {
+  string access_token = 1;
+  string token_type = 2;
+  uint32 expires_in = 3;
+  string refresh_token = 4;
+  string scope = 5;
+}
+
+message TokenValidationRequest {
+  string access_token = 1;
+}
+
+message TokenValidationResponse {
+  bool is_valid = 1;
+  string user_id = 2;
+  repeated string scopes = 3;
+}
