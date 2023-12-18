@@ -1,0 +1,6 @@
+grpcio
+grpcio-tools
+PyJWT
+psycopg2
+grpcio-reflection
+redis
