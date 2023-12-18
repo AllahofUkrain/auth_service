@@ -12,8 +12,11 @@ import auth_pb2_grpc
 import auth_pb2
 import psycopg2
 import jwt
+import redis
 
 
+JWT_SECRET = '23be4a6cb3002f3ab4d223e754ab4dd16c1979bc79cac957a1fe377e8d5746b7'
+r_client = redis.Redis(host='localhost', port=6379, db=0)
 _cleanup_coroutines = []
 
 db_config = {
@@ -31,45 +34,57 @@ class OAuth2Service(auth_pb2_grpc.OAuth2ServiceServicer):
 
     def __init__(self):
         global db_config
-        db_connection = psycopg2.connect(**db_config)
-        db_cursor = db_connection.cursor()
-        db_cursor.execute('select uuid, password, client_secret from admin.users')
-        self.db_users = {row[0]: {'password': row[1], 'client_secret': row[2]} for row in db_cursor.fetchall()}
-        del db_cursor
-        db_connection.close()
+        self.db_connection = psycopg2.connect(**db_config)
 
     def __del__(self):
-        self.db_users = {}
+        self.db_connection.close()
 
     async def generateToken(self, request: auth_pb2.TokenRequest, context: grpc.aio.ServicerContext) -> auth_pb2.TokenResponse:
 
-        payload_access_token = {
-            "grant_type": request.grant_type,
-            "client_id": request.client_id,
-            "scope": request.scope,
-            "exp": datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
-        }
+        try:
+            cur = self.db_connection.cursor()
+            cur.execute("""select client_secrete from admin.users where uuid = %s""", (request.client_id, ))
+            _sql_data = cur.fetchone()
 
-        if not request.refresh and request.client_id in refresh_cache.keys():
-            refresh_token = refresh_cache[request.client_id]
-        else:
-            payload_refresh_token = {
-                "grant_type": request.grant_type,
+            if not _sql_data:
+                raise Exception('No user found with provided data')
+
+            payload_access_token = {
                 "client_id": request.client_id,
-                "scope": request.scope
+                "exp": datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1),
             }
-            refresh_token = hashlib.sha256(json.dumps(payload_refresh_token).encode()).hexdigest()
-            refresh_cache[request.client_id] = refresh_token
 
-        client_secret = request.client_secret
+            encoded_jwt = jwt.encode(payload_access_token, JWT_SECRET, algorithm='HS256')
 
-        encoded_jwt = jwt.encode(payload_access_token, client_secret, algorithm='HS256')
+            if not request.refresh and r_client.hget(request.client_id, 'refresh'):
 
-        return auth_pb2.TokenResponse(access_token=encoded_jwt, token_type='Bearer', expires_in=3600, scope=request.scope, refresh_token=refresh_token)
+                refresh_token = r_client.hget(request.client_id, 'refresh')
+
+            else:
+                payload_refresh_token = {
+                    "client_id": request.client_id
+                }
+                refresh_token = hashlib.sha256(json.dumps(payload_refresh_token).encode()).hexdigest()
+                await r_client.hmset(request.client_id, {'jwt': encoded_jwt, 'refresh': refresh_token})
+                await r_client.expire(request.client_id, 3600)
+
+            return auth_pb2.TokenResponse(access_token=encoded_jwt, token_type='Bearer', expires_in=3600,
+                                          refresh_token=refresh_token)
+        except Exception as e:
+            raise e
 
 
     async def validateToken(self, request: auth_pb2.TokenValidationRequest, context: grpc.aio.ServicerContext) -> auth_pb2.TokenValidationResponse:
 
+        try:
+            decoded_jwt = jwt.decode(request.access_token, JWT_SECRET, algorithms=['HS256'])
+            return auth_pb2.TokenValidationResponse(user_id=json.loads(decoded_jwt)['client_id'])
+        except jwt.ExpiredSignatureError:
+            raise Exception('Token is expired, please regenerate it')
+        except jwt.InvalidTokenError:
+            raise Exception('Access token is invalid')
+        except Exception as e:
+            raise e
 
 
 

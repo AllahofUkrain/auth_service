@@ -12,10 +12,7 @@ service OAuth2Service {
 
 message TokenRequest {
   string client_id = 1;
-  string client_secret = 2;
-  string grant_type = 3;
-  string scope = 4;
-  bool refresh = 5;
+  bool refresh = 3;
 }
 
 message TokenResponse {
@@ -23,7 +20,6 @@ message TokenResponse {
   string token_type = 2;
   uint32 expires_in = 3;
   string refresh_token = 4;
-  string scope = 5;
 }
 
 message TokenValidationRequest {
@@ -31,7 +27,5 @@ message TokenValidationRequest {
 }
 
 message TokenValidationResponse {
-  bool is_valid = 1;
   string user_id = 2;
-  repeated string scopes = 3;
 }
